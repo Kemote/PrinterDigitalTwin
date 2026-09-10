@@ -1,0 +1,1 @@
+source ./printer.env && ./kit-app-template/repo.sh launch monke.printer_digital_twin.kit
