@@ -328,7 +328,7 @@ class UsdStageManager:
                 self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
             else:
                 new_x_pos = (self.x_home_pos[0] + x) / 10
-                transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(new_x_pos, self.x_home_pos[1], self.x_home_pos[2]))
+                transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(new_x_pos, 0, 0))
                 self.x_xfrom.CreateLocalMatrixAttr(transform_matrix)
 
         if y is not None and self.y_xfrom:
