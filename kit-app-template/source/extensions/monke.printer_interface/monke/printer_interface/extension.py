@@ -32,7 +32,7 @@ class MyExtension(omni.ext.IExt):
         print("[monke.printer_interface] Extension startup")
         self._thread = None
         self._queue = queue.Queue()
-        
+
          # configure and start thread for telemetry
         self.printer_bridge = PrinterBridge(self._queue)
         self._thread = threading.Thread(target=self.printer_bridge.start_websocket, daemon=True)
@@ -65,6 +65,7 @@ class PrinterBridge:
         self._queue = queue
         self.username = None
         self.session = None
+        self.home_pos = True
         self.octo_url = os.environ.get("OCTO_URL")
         self.octo_api_key = os.environ.get("OCTO_API_KEY")
         self.octo_ws_url = os.environ.get("OCTO_WS_URL")
@@ -113,7 +114,7 @@ class PrinterBridge:
             except Exception as error:
                 print(f"[PrinterBridge] Failed to send M114: {error}")
             time.sleep(0.5)
-
+    
     def get_session_token(self):
         url = f"{self.octo_url}/api/login"
         headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
@@ -124,6 +125,12 @@ class PrinterBridge:
             return data.get("name"), data.get("session")
         else:
             raise Exception(f"Failed to fetch session token: {response.status_code} - {response.text}")
+
+    def _send_printer_home(self):
+        headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
+        requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y"]},
+        headers=headers
+)
 
     def _parse_position_from_logs(self, logs):
         for line in logs:
@@ -143,6 +150,12 @@ class PrinterBridge:
         payload = data.get("current")
         if payload:
             is_printing, is_paused, is_ready = self._get_flags(payload)
+            # set inital home pos if not printing
+            print(f"IS READY: {is_ready}")
+            if not is_printing and self.home_pos:
+                self._send_printer_home()
+                self.home_pos = False
+            
             # get temps 
             temps = payload.get("temps", [{}])
             if len(temps) > 0:
@@ -213,7 +226,10 @@ class UsdStageManager:
         if not self._get_stage():        
             return
         
+        # update materials
         self._upadte_thermalpad_mat(data)
+
+        # update positions
         self._set_position(data)
 
     def _get_stage(self):
@@ -246,15 +262,15 @@ class UsdStageManager:
         if not self.x_xfrom:
             self.thermal_mat_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Looks/adhesive_thermalView/PreviewSurface")
 
-            bed_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
-            bed_prim = self.rt_stage.GetPrimAtPath(bed_prim_path)
-            if bed_prim.IsValid():
-                self.x_xfrom = Rt.Xformable(bed_prim)
+            x_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
+            x_prim = self.rt_stage.GetPrimAtPath(x_prim_path)
+            if x_prim.IsValid():
+                self.x_xfrom  = Rt.Xformable(x_prim)
 
-            y_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
+            y_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
             y_prim = self.rt_stage.GetPrimAtPath(y_prim_path)
             if y_prim.IsValid():
-                self.y_xfrom = Rt.Xformable(y_prim)
+                self.y_xfrom= Rt.Xformable(y_prim)
 
             z_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner")
             z_prim = self.rt_stage.GetPrimAtPath(z_prim_path)
@@ -305,14 +321,12 @@ class UsdStageManager:
         return GfRt.Vec3f([r, g, b])
 
     def _get_home_pos(self, prim_path_str):
-        """
-        Read the home position via plain pxr USD instead of usdrt's Fabric-backed
-        world-position attribute: the latter is only populated once Fabric has
-        flattened a transform for this prim, which never happens for a prim with
-        no authored xformOps (confirmed: it stays permanently invalid here). This
-        one-time read isn't performance sensitive, so there's no need for the
-        Fabric fast path.
-        """
+        # Read the home position via plain pxr USD instead of usdrt's Fabric-backed
+        # world-position attribute: the latter is only populated once Fabric has
+        # flattened a transform for this prim, which never happens for a prim with
+        # no authored xformOps (confirmed: it stays permanently invalid here). This
+        # one-time read isn't performance sensitive, so there's no need for the
+        # Fabric fast path.
         prim = self.pxr_stage.GetPrimAtPath(prim_path_str)
         world_transform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return world_transform.ExtractTranslation()
@@ -324,7 +338,7 @@ class UsdStageManager:
 
         if x is not None and self.x_xfrom:
             if self.x_home_pos is None:
-                self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
+                self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
             else:
                 new_x_pos = (self.x_home_pos[0] + x) / 10
                 transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(new_x_pos, 0, 0))
@@ -332,7 +346,7 @@ class UsdStageManager:
 
         if y is not None and self.y_xfrom:
             if self.y_home_pos is None:
-                self.y_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
+                self.y_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
             else:
                 new_y_pos = (self.y_home_pos[1] + y) / 10
                 transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(0.0, new_y_pos, 0.0))
