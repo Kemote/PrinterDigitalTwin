@@ -32,7 +32,7 @@ class MyExtension(omni.ext.IExt):
         print("[monke.printer_interface] Extension startup")
         self._thread = None
         self._queue = queue.Queue()
-
+        
          # configure and start thread for telemetry
         self.printer_bridge = PrinterBridge(self._queue)
         self._thread = threading.Thread(target=self.printer_bridge.start_websocket, daemon=True)
@@ -213,10 +213,7 @@ class UsdStageManager:
         if not self._get_stage():        
             return
         
-        # update materials
         self._upadte_thermalpad_mat(data)
-
-        # update positions
         self._set_position(data)
 
     def _get_stage(self):
@@ -308,12 +305,14 @@ class UsdStageManager:
         return GfRt.Vec3f([r, g, b])
 
     def _get_home_pos(self, prim_path_str):
-        # Read the home position via plain pxr USD instead of usdrt's Fabric-backed
-        # world-position attribute: the latter is only populated once Fabric has
-        # flattened a transform for this prim, which never happens for a prim with
-        # no authored xformOps (confirmed: it stays permanently invalid here). This
-        # one-time read isn't performance sensitive, so there's no need for the
-        # Fabric fast path.
+        """
+        Read the home position via plain pxr USD instead of usdrt's Fabric-backed
+        world-position attribute: the latter is only populated once Fabric has
+        flattened a transform for this prim, which never happens for a prim with
+        no authored xformOps (confirmed: it stays permanently invalid here). This
+        one-time read isn't performance sensitive, so there's no need for the
+        Fabric fast path.
+        """
         prim = self.pxr_stage.GetPrimAtPath(prim_path_str)
         world_transform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return world_transform.ExtractTranslation()
