@@ -130,7 +130,7 @@ class PrinterBridge:
         headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
         requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y"]},
         headers=headers
-)
+        )
 
     def _parse_position_from_logs(self, logs):
         for line in logs:
@@ -147,45 +147,52 @@ class PrinterBridge:
 
     def _on_message(self, ws, message):
         data = json.loads(message)
+        rafined_data = {}
         payload = data.get("current")
+
         if payload:
             is_printing, is_paused, is_ready = self._get_flags(payload)
+            rafined_data["is_printing"] = is_printing
+            rafined_data["is_paused"] = is_paused
+            rafined_data["is_ready"] = is_ready
+
             # set inital home pos if not printing
-            print(f"IS READY: {is_ready}")
             if not is_printing and self.home_pos:
                 self._send_printer_home()
                 self.home_pos = False
             
             # get temps 
+            # print(f"/n PAYLOAD {payload}")
             temps = payload.get("temps", [{}])
+            # print(f"TEMPS: {temps}")
             if len(temps) > 0:
                 temps = temps[0]
-                plugins_data = payload.get("plugins", {})
-                dlp_data = plugins_data.get("DisplayLayerProgress", {}).get("print", {})
-
-                rafined_data = {
+                rafined_data |= {
                     "hotend_actual": temps.get("tool0", {}).get("actual", 0.0),
                     "hotend_target": temps.get("tool0", {}).get("target", 0.0),
                     "bed_actual": temps.get("bed", {}).get("actual", 0.0),
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
 
-                if is_printing and ("x" in dlp_data):
-                    rafined_data["pos_x"] = dlp_data.get("x", 0.0)
-                    rafined_data["pos_y"] = dlp_data.get("y", 0.0)
-                    rafined_data["pos_z"] = dlp_data.get("z", 0.0)
-                else:
-                    # if printer is not activly printing we need to use M114 command inseet DisplayLayerProgress plugin
-                    logs = payload.get("logs", [])
-                    position = self._parse_position_from_logs(logs)
-                    if position:
-                        rafined_data["pos_x"], rafined_data["pos_y"], rafined_data["pos_z"] = position
+            # set position
+            plugins_data = payload.get("plugins", {})
+            if plugins_data and is_printing:
+                dlp_data = plugins_data.get("DisplayLayerProgress", {}).get("print", {})
+                # print(f"/n DLP DATA: {dlp_data}")
+                rafined_data |= {
+                    "pos_x": dlp_data.get("x", 0.0),
+                    "pos_y": dlp_data.get("y", 0.0),
+                    "pos_z": dlp_data.get("z", 0.0)
+                }
 
-                rafined_data["is_printing"] = is_printing
-                rafined_data["is_paused"] = is_paused
-                rafined_data["is_ready"] = is_ready
+            else:
+                # if printer is not activly printing we need to use M114 command inseet DisplayLayerProgress plugin
+                logs = payload.get("logs", [])
+                position = self._parse_position_from_logs(logs)
+                if position:
+                    rafined_data["pos_x"], rafined_data["pos_y"], rafined_data["pos_z"] = position
 
-                self._queue.put(rafined_data)
+            self._queue.put(rafined_data)
 
     def _on_error(self, ws, error):
         print(f"[PrinterBridge] WebSocket Error: {error}")
@@ -222,7 +229,6 @@ class UsdStageManager:
             self._update_stage(data)
 
     def _update_stage(self, data):
-        print(f"DATA: {data}")
         if not self._get_stage():        
             return
         
@@ -260,7 +266,7 @@ class UsdStageManager:
             self.z_home_pos = None
 
         if not self.x_xfrom:
-            self.thermal_mat_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Looks/adhesive_thermalView/PreviewSurface")
+            self.thermal_mat_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Looks/thermal_heatMap/PreviewSurface")
 
             x_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
             x_prim = self.rt_stage.GetPrimAtPath(x_prim_path)
@@ -332,6 +338,7 @@ class UsdStageManager:
         return world_transform.ExtractTranslation()
 
     def _set_position(self, data):
+        print("SET")
         x = data.get("pos_x")
         y = data.get("pos_y")
         z = data.get("pos_z")
@@ -340,7 +347,7 @@ class UsdStageManager:
             if self.x_home_pos is None:
                 self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
             else:
-                new_x_pos = (self.x_home_pos[0] + x) / 10
+                new_x_pos = (self.x_home_pos[0] - x) / 10
                 transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(new_x_pos, 0, 0))
                 self.x_xfrom.CreateLocalMatrixAttr(transform_matrix)
 
