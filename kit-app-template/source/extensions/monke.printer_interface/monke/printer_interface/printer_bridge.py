@@ -76,7 +76,7 @@ class PrinterBridge:
 
     def _send_printer_home(self):
         headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
-        requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y"]},
+        requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y", "z"]},
         headers=headers
         )
 
@@ -111,9 +111,7 @@ class PrinterBridge:
                 self.home_pos = False
             
             # get temps 
-            # print(f"/n PAYLOAD {payload}")
             temps = payload.get("temps", [{}])
-            # print(f"TEMPS: {temps}")
             if len(temps) > 0:
                 temps = temps[0]
                 rafined_data |= {
@@ -123,7 +121,7 @@ class PrinterBridge:
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
 
-            # set position
+            # get position
             print(f"PAYLOAD: {payload}")
             plugins_data = payload.get("plugins", {})
             dlp_data = plugins_data.get("DisplayLayerProgress", {}).get("print", {}) if plugins_data else {}
@@ -145,8 +143,12 @@ class PrinterBridge:
                 logs = payload.get("logs", [])
                 position = self._parse_position_from_logs(logs)
 
-            if position:
-                rafined_data["pos_x"], rafined_data["pos_y"], rafined_data["pos_z"] = position
+                # WE PLAN TO GET RID OF OMVING POSITIONS BASED ON TEELEMETRY BECAUSE OF LOW FREWUWNECY RATHER IT SHOULD BE USED ONLY TO CHECK
+                # IF ITS GETTING CORRECXT POSITIONS FORM WEBCAM
+
+
+            # if position:
+            #     rafined_data["pos_x"], rafined_data["pos_y"], rafined_data["pos_z"] = position
 
             print(f"PRINTER DATA: {rafined_data}")
             self._queue.put(rafined_data)

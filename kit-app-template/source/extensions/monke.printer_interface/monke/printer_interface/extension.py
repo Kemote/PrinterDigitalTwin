@@ -3,9 +3,9 @@ import threading
 import omni.ext
 import omni.kit.app
 
-from printer_bridge import PrinterBridge
-from usd_stage_manager import UsdStageManager
-
+from .printer_bridge import PrinterBridge
+from .printer_vision import PrinterVision
+from .usd_stage_manager import UsdStageManager
 
 # Functions and vars are available to other extensions as usual in python:
 # `monke.printer_interface.some_public_function(x)`
@@ -24,6 +24,11 @@ class MyExtension(omni.ext.IExt):
         print("[monke.printer_interface] Extension startup")
         self._thread = None
         self._queue = queue.Queue()
+
+        # configure and start thread for vision
+        self.printer_vision = PrinterVision(self._queue)
+        self._vision_thread = threading.Thread(target=self.printer_vision.start_websocket, daemon=True)
+        self._vision_thread.start()
 
          # configure and start thread for telemetry
         self.printer_bridge = PrinterBridge(self._queue)
