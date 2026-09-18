@@ -53,3 +53,6 @@ class MyExtension(omni.ext.IExt):
             self._thread.join(timeout=1.0)
         if self._m114_thread and self._m114_thread.is_alive():
             self._m114_thread.join(timeout=1.0)
+
+
+# TODO: czy uzywac thread czy asyncio dla tego wszystkiego?
