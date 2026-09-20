@@ -17,6 +17,8 @@ python = "../../_build/target-deps/python"
 packages = [
     "websocket-client",
     "requests",
+    "websockets",
+    "httpx",
 ]
 target = "../../source/extensions/monke.printer_interface/pip_prebundle"
 

@@ -1,13 +1,20 @@
 import re
 import os
-import time
 import json
-import threading
-import requests
-import websocket
+import asyncio
+import httpx
+import websockets
+from websockets.exceptions import ConnectionClosed
 
 
 class PrinterBridge:
+    """Talks to OctoPrint: authenticates, listens to its status websocket for
+    live printer state/telemetry, and polls M114 so position shows up in that
+    feed. Owns its own concurrency - run() fans out into the websocket
+    listener and the M114 poller as sibling tasks - so extension.py only has
+    to schedule one coroutine via omni.kit.async_engine.
+    """
+
     _POSITION_TOLERANCE = 0.5  # mm
 
     def __init__(self, queue):
@@ -23,6 +30,10 @@ class PrinterBridge:
         self.octo_url = os.environ.get("OCTO_URL")
         self.octo_api_key = os.environ.get("OCTO_API_KEY")
         self.octo_ws_url = os.environ.get("OCTO_WS_URL")
+        headers = {"X-Api-Key": self.octo_api_key} if self.octo_api_key else {}
+        self._client = httpx.AsyncClient(headers=headers)
+
+    async def run(self):
         if not (self.octo_url and self.octo_api_key and self.octo_ws_url):
             print(
                 "[PrinterBridge] OCTO_URL, OCTO_API_KEY and OCTO_WS_URL "
@@ -31,14 +42,23 @@ class PrinterBridge:
             return
 
         # fetch a session token up front so the websocket can authenticate on open
-        is_octo_connected = False
-        while not is_octo_connected:
+        await self._authenticate()
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(self._listen_websocket())
+            tg.create_task(self._poll_m114())
+
+    async def aclose(self):
+        await self._client.aclose()
+
+    async def _authenticate(self):
+        while True:
             try:
-                self.username, self.session = self.get_session_token()
-                is_octo_connected = True
+                self.username, self.session = await self.get_session_token()
+                return
             except Exception as error:
                 print(f"[PrinterBridge] Failed to fetch OctoPrint session token: {error}, waiting for connection")
-                time.sleep(1)
+                await asyncio.sleep(1)
 
     def _get_flags(self, payload):
         state_data = payload.get("state", {})
@@ -46,31 +66,34 @@ class PrinterBridge:
         self.is_printing = flags.get("printing", False)
         self.is_paused = flags.get("paused", False)
         self.is_ready = flags.get("ready", False)
-    
-    def start_websocket(self):
-        self.ws = websocket.WebSocketApp(
-            self.octo_ws_url,
-            on_open=self._on_open,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close
-        )
-        self.ws.run_forever()
 
-    def send_m114(self):
+    async def _listen_websocket(self):
+        # `async for ws in websockets.connect(...)` reconnects automatically
+        # (with backoff) on drop, re-authenticating each time.
+        async for ws in websockets.connect(self.octo_ws_url):
+            self.ws = ws
+            try:
+                print("[PrinterBridge] WebSocket Connected. Authenticating...")
+                await ws.send(json.dumps({"auth": f"{self.username}:{self.session}"}))
+                async for message in ws:
+                    await self._handle_message(message)
+            except ConnectionClosed as error:
+                print(f"[PrinterBridge] WebSocket Closed: {error}")
+            finally:
+                self.ws = None
+
+    async def _poll_m114(self):
         url = f"{self.octo_url}/api/printer/command"
-        headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
         while True:
             try:
-                requests.post(url, json={"command": "M114"}, headers=headers, timeout=1)
+                await self._client.post(url, json={"command": "M114"}, timeout=1)
             except Exception as error:
                 print(f"[PrinterBridge] Failed to send M114: {error}")
-            time.sleep(0.5)
-    
-    def get_session_token(self):
+            await asyncio.sleep(0.5)
+
+    async def get_session_token(self):
         url = f"{self.octo_url}/api/login"
-        headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
-        response = requests.post(url, json={"passive": True}, headers=headers)
+        response = await self._client.post(url, json={"passive": True}, timeout=10)
 
         if response.status_code == 200:
             data = response.json()
@@ -78,25 +101,25 @@ class PrinterBridge:
         else:
             raise Exception(f"Failed to fetch session token: {response.status_code} - {response.text}")
 
-    def send_printer_home(self):
+    async def send_printer_home(self):
         if not self.is_printing:
-            headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
-            requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y", "z"]},
-            headers=headers
+            await self._client.post(
+                f"{self.octo_url}/api/printer/printhead",
+                json={"command": "home", "axes": ["x", "y", "z"]},
+                timeout=10,
             )
 
-    def set_position(self, x, y, z):
+    async def set_position(self, x, y, z):
         print(f"[PrinterBridge] Seting printer position {x}, {y}, {z}...")
-        if not self.is_printing:
-            url = f"{self.octo_url}/api/printer/printhead"
-            headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
-            response = requests.post(url, json={"command": "jog", "x": x, "y": y, "z": z}, headers=headers)
-            if response.status_code in (200, 204):
-                return True
-            else:
-                raise Exception(f"Error occured during moving to position: {response.status_code} - {response.text}")
-        else:
+        if self.is_printing:
             return False
+
+        url = f"{self.octo_url}/api/printer/printhead"
+        response = await self._client.post(url, json={"command": "jog", "x": x, "y": y, "z": z}, timeout=10)
+        if response.status_code in (200, 204):
+            return True
+        else:
+            raise Exception(f"Error occured during moving to position: {response.status_code} - {response.text}")
 
     def _parse_position_from_logs(self, logs):
         for line in logs:
@@ -106,12 +129,7 @@ class PrinterBridge:
                 return float(x), float(y), float(z)
         return None, None, None
 
-    def _on_open(self, ws):
-        print("[PrinterBridge] WebSocket Connected. Authenticating...")
-        auth_payload = {"auth": f"{self.username}:{self.session}"}
-        ws.send(json.dumps(auth_payload))
-
-    def _on_message(self, ws, message):
+    async def _handle_message(self, message):
         data = json.loads(message)
         rafined_data = {}
         payload = data.get("current")
@@ -124,10 +142,10 @@ class PrinterBridge:
 
             # set inital home pos if not printing
             if self.home_pos:
-                self.send_printer_home()
+                await self.send_printer_home()
                 self.home_pos = False
-            
-            # get temps 
+
+            # get temps
             temps = payload.get("temps", [{}])
             if len(temps) > 0:
                 temps = temps[0]
@@ -141,11 +159,5 @@ class PrinterBridge:
             # get telemetry position
             logs = payload.get("logs", [])
             rafined_data["tele_x"], rafined_data["tele_y"], rafined_data["tele_z"] = self._parse_position_from_logs(logs)
-        
+
             self._queue.put(rafined_data)
-
-    def _on_error(self, ws, error):
-        print(f"[PrinterBridge] WebSocket Error: {error}")
-
-    def _on_close(self, ws, close_status, close_msg):
-        print("[PrinterBridge] WebSocket Closed")

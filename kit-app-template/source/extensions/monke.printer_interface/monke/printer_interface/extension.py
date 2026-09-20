@@ -1,8 +1,7 @@
 import queue
-import threading
 import omni.ext
 import omni.kit.app
-import time
+import omni.kit.async_engine as omni_async
 
 from .printer_bridge import PrinterBridge
 from .printer_vision import PrinterVision
@@ -24,26 +23,28 @@ def some_public_function(x: int):
 class MyExtension(omni.ext.IExt):
     def on_startup(self, _ext_id):
         print("[monke.printer_interface] Extension startup")
-        self._thread = None
+        self._vision_task = None
+        self._bridge_task = None
+        self._calibration_task = None
         self.queue = queue.Queue()
         self.printer_vision = PrinterVision(self.queue)
         self.printer_bridge = PrinterBridge(self.queue)
 
-        # start thread for vision
-        self._vision_thread = threading.Thread(target=self.printer_vision.start_websocket, daemon=True)
-        self._vision_thread.start()
+        # vision and the OctoPrint bridge each run as a coroutine on Kit's own
+        # asyncio loop instead of a dedicated OS thread - see
+        # PrinterVision.run() / PrinterBridge.run()
+        self._vision_task = omni_async.run_coroutine(self.printer_vision.run())
+        self._bridge_task = omni_async.run_coroutine(self.printer_bridge.run())
 
-         # tart thread for printer communication
-        self._thread = threading.Thread(target=self.printer_bridge.start_websocket, daemon=True)
-        self._thread.start()
-
-        # TODO: do we need to do that in separate thred?
-        # start M114 request thread so position telemetry is available during calibration
-        self._m114_thread = threading.Thread(target=self.printer_bridge.send_m114, daemon=True)
-        self._m114_thread.start()
-
+        # calibration also runs as a coroutine (it awaits printer_vision's and
+        # printer_bridge's coroutine-based calls) - this also means
+        # calibration no longer blocks the whole extension/viewport for its
+        # duration.
         calibrator = Calibrator(self.printer_bridge, self.printer_vision, self.queue)
-        calibrator.calibrate_printer()
+        self._calibration_task = omni_async.run_coroutine(self._run_calibration(calibrator))
+
+    async def _run_calibration(self, calibrator):
+        await calibrator.calibrate_printer()
 
         # set omni app event stream
         self.usd_stage_mgr = UsdStageManager(self.queue)
@@ -53,12 +54,10 @@ class MyExtension(omni.ext.IExt):
 
     def on_shutdown(self):
         print("[monke.printer_interface] Extension shutdown")
-        if self.printer_bridge.ws:
-            self.printer_bridge.ws.close()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-        if self._m114_thread and self._m114_thread.is_alive():
-            self._m114_thread.join(timeout=1.0)
-
-
-# TODO: czy uzywac thread czy asyncio dla tego wszystkiego?
+        if self._vision_task:
+            self._vision_task.cancel()
+        if self._bridge_task:
+            self._bridge_task.cancel()
+        if self._calibration_task:
+            self._calibration_task.cancel()
+        omni_async.run_coroutine(self.printer_bridge.aclose())

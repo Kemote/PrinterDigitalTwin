@@ -1,4 +1,4 @@
-import time
+import asyncio
 import queue
 import os
 import json
@@ -19,8 +19,8 @@ class Calibrator:
             with open(self.CALIBRATION_FILE, "r") as f:
                 self.calib_pos = json.load(f)
 
-    def _send_calibration(self):
-        self.printer_vision.send_calibration({
+    async def _send_calibration(self):
+        await self.printer_vision.send_calibration({
             "rtl_pos": self.calib_pos["r_pos_tl"],
             "rtr_pos": self.calib_pos["r_pos_tr"],
             "rbr_pos": self.calib_pos["r_pos_br"],
@@ -28,9 +28,9 @@ class Calibrator:
             "gt_pos": self.calib_pos["g_pos_max"],
             "gb_pos": self.calib_pos["g_pos_min"]
         })
-        time.sleep(2)
+        await asyncio.sleep(2)
 
-    def calibrate_printer(self):
+    async def calibrate_printer(self):
         # calibrate printer with webcam
         if not self.calib_pos:
             print("[monke.printer_interface] Calibrating printer....")
@@ -59,19 +59,23 @@ class Calibrator:
                 y = step["position"][1]
                 z = step["position"][2]
 
-                self.printer_bridge.set_position(x, y, z)
+                await self.printer_bridge.set_position(x, y, z)
                 print(f"[monke.printer_interface] Get visual position of {step['position']}")
-                time.sleep(150)
+                await asyncio.sleep(150)
 
                 queue_semaphor = False
                 while not queue_semaphor:
+                    # Drain down to the freshest sample, discarding any stale
+                    # backlog - same as before, but bounded so an empty queue
+                    # can't leave queue_data unset.
+                    queue_data = None
                     while True:
                         try:
                             queue_data = self.queue.get_nowait()
                         except queue.Empty:
                             break
 
-                    if "marker_gx" in queue_data:
+                    if queue_data and "marker_gx" in queue_data:
                         if None not in [queue_data["marker_gx"], queue_data["marker_gy"], queue_data["marker_rx"], queue_data["marker_ry"]]:
                             if step["g_key"]:
                                 self.calib_pos[step["g_key"]] = [
@@ -83,10 +87,16 @@ class Calibrator:
                                 queue_data["marker_ry"]
                             ]
                             queue_semaphor = True
-    
+                            continue
+
+                    # No usable sample yet - yield to Kit's loop instead of
+                    # spinning; without this the whole app (viewport included)
+                    # would freeze until a matching sample shows up.
+                    await asyncio.sleep(0.1)
+
             if not None in self.calib_pos.values():
                 with open(self.CALIBRATION_FILE, "w") as f:
                     json.dump(self.calib_pos, f)
                 print("[monke.printer_interface] Printer calibrated with vision data")
 
-        self._send_calibration()
+        await self._send_calibration()
