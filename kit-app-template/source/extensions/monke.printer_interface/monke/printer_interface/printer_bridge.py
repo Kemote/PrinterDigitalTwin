@@ -9,18 +9,16 @@ from websockets.exceptions import ConnectionClosed
 
 class PrinterBridge:
     """Talks to OctoPrint: authenticates, listens to its status websocket for
-    live printer state/telemetry, and polls M114 so position shows up in that
-    feed. Owns its own concurrency - run() fans out into the websocket
-    listener and the M114 poller as sibling tasks - so extension.py only has
-    to schedule one coroutine via omni.kit.async_engine.
+    live printer state/telemetry, and polls M114 so position (tele_x/y/z)
+    shows up in that feed. Owns its own concurrency - run() fans out into the
+    websocket listener and the M114 poller as sibling tasks - so extension.py
+    only has to schedule one coroutine via omni.kit.async_engine.
     """
 
-    _POSITION_TOLERANCE = 0.5  # mm
-
-    def __init__(self, queue):
+    def __init__(self, extension_queue):
         self._M114_RE = re.compile(r"X:(-?\d+\.?\d*)\s+Y:(-?\d+\.?\d*)\s+Z:(-?\d+\.?\d*)")
         self.ws = None
-        self._queue = queue
+        self._queue = extension_queue
         self.username = None
         self.session = None
         self.home_pos = True
@@ -136,9 +134,6 @@ class PrinterBridge:
 
         if payload:
             self._get_flags(payload)
-            rafined_data["is_printing"] = self.is_printing
-            rafined_data["is_paused"] = self.is_paused
-            rafined_data["is_ready"] = self.is_ready
 
             # set inital home pos if not printing
             if self.home_pos:
@@ -150,8 +145,6 @@ class PrinterBridge:
             if len(temps) > 0:
                 temps = temps[0]
                 rafined_data |= {
-                    "hotend_actual": temps.get("tool0", {}).get("actual", 0.0),
-                    "hotend_target": temps.get("tool0", {}).get("target", 0.0),
                     "bed_actual": temps.get("bed", {}).get("actual", 0.0),
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
@@ -160,4 +153,4 @@ class PrinterBridge:
             logs = payload.get("logs", [])
             rafined_data["tele_x"], rafined_data["tele_y"], rafined_data["tele_z"] = self._parse_position_from_logs(logs)
 
-            self._queue.put(rafined_data)
+            self._queue.put_nowait(rafined_data)

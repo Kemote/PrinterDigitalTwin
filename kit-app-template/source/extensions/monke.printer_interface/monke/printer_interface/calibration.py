@@ -1,5 +1,4 @@
 import asyncio
-import queue
 import os
 import json
 
@@ -7,11 +6,11 @@ import json
 class Calibrator:
     CALIBRATION_FILE = "./calibration.json"
 
-    def __init__(self, printer_bridge, printer_vision, queue):
+    def __init__(self, printer_bridge, printer_vision, extension_queue):
         self.printer_bridge = printer_bridge
         self.printer_vision = printer_vision
         self.get_corrections = True
-        self.queue = queue
+        self.queue = extension_queue
 
         self.calib_pos = None
         recalibrate = os.environ.get("RECALIBRATE_VISION") == "True"
@@ -65,17 +64,17 @@ class Calibrator:
 
                 queue_semaphor = False
                 while not queue_semaphor:
-                    # Drain down to the freshest sample, discarding any stale
-                    # backlog - same as before, but bounded so an empty queue
-                    # can't leave queue_data unset.
-                    queue_data = None
+                    # Wait for at least one sample - no polling, this truly
+                    # suspends and lets Kit's loop do other work - then drain
+                    # down to the freshest one, discarding any stale backlog.
+                    queue_data = await self.queue.get()
                     while True:
                         try:
                             queue_data = self.queue.get_nowait()
-                        except queue.Empty:
+                        except asyncio.QueueEmpty:
                             break
 
-                    if queue_data and "marker_gx" in queue_data:
+                    if "marker_gx" in queue_data:
                         if None not in [queue_data["marker_gx"], queue_data["marker_gy"], queue_data["marker_rx"], queue_data["marker_ry"]]:
                             if step["g_key"]:
                                 self.calib_pos[step["g_key"]] = [
@@ -87,12 +86,6 @@ class Calibrator:
                                 queue_data["marker_ry"]
                             ]
                             queue_semaphor = True
-                            continue
-
-                    # No usable sample yet - yield to Kit's loop instead of
-                    # spinning; without this the whole app (viewport included)
-                    # would freeze until a matching sample shows up.
-                    await asyncio.sleep(0.1)
 
             if not None in self.calib_pos.values():
                 with open(self.CALIBRATION_FILE, "w") as f:

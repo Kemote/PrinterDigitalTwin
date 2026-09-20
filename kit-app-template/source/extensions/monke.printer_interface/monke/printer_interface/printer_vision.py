@@ -14,9 +14,9 @@ class PrinterVision:
     via omni.kit.async_engine) instead of a dedicated OS thread.
     """
 
-    def __init__(self, queue):
+    def __init__(self, extension_queue):
         self.ws = None
-        self._queue = queue
+        self._queue = extension_queue
         self.cam_tracker_ws_url = os.environ.get("CAM_TRACKER_WS_URL", "ws://localhost:8765")
         self._connected = asyncio.Event()
 
@@ -46,15 +46,14 @@ class PrinterVision:
 
         msg_type = data.get("type")
         if msg_type == "position":
-            self._queue.put({
+            self._queue.put_nowait({
                 "pos_x": data.get("x"),
                 "pos_y": data.get("y"),
                 "pos_z": data.get("z"),
                 "marker_rx": data.get("marker_rx"),
                 "marker_ry": data.get("marker_ry"),
                 "marker_gx": data.get("marker_gx"),
-                "marker_gy": data.get("marker_gy"),
-                "t": data.get("t")
+                "marker_gy": data.get("marker_gy")
             })
         elif msg_type == "calibration_ack":
             print(f"[PrinterVision] Calibration acknowledged: {data.get('points')}")

@@ -1,6 +1,6 @@
 import time
 import carb
-import queue
+import asyncio
 import omni
 
 from pxr import Usd, UsdGeom
@@ -47,7 +47,7 @@ class UsdStageManager:
             try:
                 data = self.queue.get_nowait()
 
-            except queue.Empty:
+            except asyncio.QueueEmpty:
                 break
 
             self._on_telemetry(data)

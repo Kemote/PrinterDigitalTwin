@@ -1,4 +1,4 @@
-import queue
+import asyncio
 import omni.ext
 import omni.kit.app
 import omni.kit.async_engine as omni_async
@@ -7,13 +7,6 @@ from .printer_bridge import PrinterBridge
 from .printer_vision import PrinterVision
 from .usd_stage_manager import UsdStageManager
 from .calibration import Calibrator
-
-# Functions and vars are available to other extensions as usual in python:
-# `monke.printer_interface.some_public_function(x)`
-def some_public_function(x: int):
-    """This is a public function that can be called from other extensions."""
-    print(f"[monke.printer_interface] some_public_function was called with {x}")
-    return x**x
 
 
 # Any class derived from `omni.ext.IExt` in the top level module (defined in
@@ -26,7 +19,7 @@ class MyExtension(omni.ext.IExt):
         self._vision_task = None
         self._bridge_task = None
         self._calibration_task = None
-        self.queue = queue.Queue()
+        self.queue = asyncio.Queue()
         self.printer_vision = PrinterVision(self.queue)
         self.printer_bridge = PrinterBridge(self.queue)
 
