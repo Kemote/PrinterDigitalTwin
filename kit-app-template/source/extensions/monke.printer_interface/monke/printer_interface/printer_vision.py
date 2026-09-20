@@ -24,6 +24,7 @@ class PrinterVision:
         )
         self.ws.run_forever()
 
+
     def send_calibration(self, points):
         """Push new calibration corner points to cam_tracker.
 
@@ -53,7 +54,13 @@ class PrinterVision:
                 "pos_x": data.get("x"),
                 "pos_y": data.get("y"),
                 "pos_z": data.get("z"),
+                "marker_rx": data.get("marker_rx"),
+                "marker_ry": data.get("marker_ry"),
+                "marker_gx": data.get("marker_gx"),
+                "marker_gy": data.get("marker_gy"),
+                "t": data.get("t")
             })
+
         elif msg_type == "calibration_ack":
             print(f"[PrinterVision] Calibration acknowledged: {data.get('points')}")
         elif msg_type == "calibration_error":

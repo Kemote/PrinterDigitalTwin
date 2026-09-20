@@ -2,11 +2,14 @@ import re
 import os
 import time
 import json
+import threading
 import requests
 import websocket
 
 
 class PrinterBridge:
+    _POSITION_TOLERANCE = 0.5  # mm
+
     def __init__(self, queue):
         self._M114_RE = re.compile(r"X:(-?\d+\.?\d*)\s+Y:(-?\d+\.?\d*)\s+Z:(-?\d+\.?\d*)")
         self.ws = None
@@ -14,6 +17,9 @@ class PrinterBridge:
         self.username = None
         self.session = None
         self.home_pos = True
+        self.is_printing = False
+        self.is_paused = False
+        self.is_ready = False
         self.octo_url = os.environ.get("OCTO_URL")
         self.octo_api_key = os.environ.get("OCTO_API_KEY")
         self.octo_ws_url = os.environ.get("OCTO_WS_URL")
@@ -34,14 +40,12 @@ class PrinterBridge:
                 print(f"[PrinterBridge] Failed to fetch OctoPrint session token: {error}, waiting for connection")
                 time.sleep(1)
 
-    @staticmethod
-    def _get_flags(payload):
+    def _get_flags(self, payload):
         state_data = payload.get("state", {})
         flags = state_data.get("flags", {})
-        is_printing = flags.get("printing", False)
-        is_paused = flags.get("paused", False)
-        is_ready = flags.get("ready", False)
-        return is_printing, is_paused, is_ready
+        self.is_printing = flags.get("printing", False)
+        self.is_paused = flags.get("paused", False)
+        self.is_ready = flags.get("ready", False)
     
     def start_websocket(self):
         self.ws = websocket.WebSocketApp(
@@ -74,11 +78,25 @@ class PrinterBridge:
         else:
             raise Exception(f"Failed to fetch session token: {response.status_code} - {response.text}")
 
-    def _send_printer_home(self):
-        headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
-        requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y", "z"]},
-        headers=headers
-        )
+    def send_printer_home(self):
+        if not self.is_printing:
+            headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
+            requests.post( f"{self.octo_url}/api/printer/printhead", json={"command": "home", "axes": ["x", "y", "z"]},
+            headers=headers
+            )
+
+    def set_position(self, x, y, z):
+        print(f"[PrinterBridge] Seting printer position {x}, {y}, {z}...")
+        if not self.is_printing:
+            url = f"{self.octo_url}/api/printer/printhead"
+            headers = {"X-Api-Key": self.octo_api_key, "Content-Type": "application/json"}
+            response = requests.post(url, json={"command": "jog", "x": x, "y": y, "z": z}, headers=headers)
+            if response.status_code in (200, 204):
+                return True
+            else:
+                raise Exception(f"Error occured during moving to position: {response.status_code} - {response.text}")
+        else:
+            return False
 
     def _parse_position_from_logs(self, logs):
         for line in logs:
@@ -86,7 +104,7 @@ class PrinterBridge:
             if match:
                 x, y, z = match.groups()
                 return float(x), float(y), float(z)
-        return None
+        return None, None, None
 
     def _on_open(self, ws):
         print("[PrinterBridge] WebSocket Connected. Authenticating...")
@@ -96,18 +114,17 @@ class PrinterBridge:
     def _on_message(self, ws, message):
         data = json.loads(message)
         rafined_data = {}
-        print(f"DATA: {data}")
         payload = data.get("current")
 
         if payload:
-            is_printing, is_paused, is_ready = self._get_flags(payload)
-            rafined_data["is_printing"] = is_printing
-            rafined_data["is_paused"] = is_paused
-            rafined_data["is_ready"] = is_ready
+            self._get_flags(payload)
+            rafined_data["is_printing"] = self.is_printing
+            rafined_data["is_paused"] = self.is_paused
+            rafined_data["is_ready"] = self.is_ready
 
             # set inital home pos if not printing
-            if not is_printing and self.home_pos:
-                self._send_printer_home()
+            if self.home_pos:
+                self.send_printer_home()
                 self.home_pos = False
             
             # get temps 
@@ -121,36 +138,10 @@ class PrinterBridge:
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
 
-            # get position
-            print(f"PAYLOAD: {payload}")
-            plugins_data = payload.get("plugins", {})
-            dlp_data = plugins_data.get("DisplayLayerProgress", {}).get("print", {}) if plugins_data else {}
-            has_dlp_data = (
-                is_printing
-                and dlp_data.get("x") is not None
-                and dlp_data.get("y") is not None
-                and dlp_data.get("z") is not None
-            )
-
-            if has_dlp_data:
-                position = (dlp_data["x"], dlp_data["y"], dlp_data["z"])
-            else:
-                # DisplayLayerProgress isn't reporting real data (plugin missing/disabled,
-                # or unsupported for this file) - previously this silently defaulted to
-                # (0, 0, 0) whenever "plugins" had other entries but no DisplayLayerProgress
-                # key, which snapped the model toward the home corner mid-print. Always fall
-                # back to parsing the real position out of the M114 logs instead.
-                logs = payload.get("logs", [])
-                position = self._parse_position_from_logs(logs)
-
-                # WE PLAN TO GET RID OF OMVING POSITIONS BASED ON TEELEMETRY BECAUSE OF LOW FREWUWNECY RATHER IT SHOULD BE USED ONLY TO CHECK
-                # IF ITS GETTING CORRECXT POSITIONS FORM WEBCAM
-
-
-            # if position:
-            #     rafined_data["pos_x"], rafined_data["pos_y"], rafined_data["pos_z"] = position
-
-            print(f"PRINTER DATA: {rafined_data}")
+            # get telemetry position
+            logs = payload.get("logs", [])
+            rafined_data["tele_x"], rafined_data["tele_y"], rafined_data["tele_z"] = self._parse_position_from_logs(logs)
+        
             self._queue.put(rafined_data)
 
     def _on_error(self, ws, error):

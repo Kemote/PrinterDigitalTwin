@@ -16,7 +16,7 @@ class UsdStageManager:
     SMOOTH_DURATION = 1.0
 
     def __init__(self, extension_queue):
-        self._queue = extension_queue
+        self.queue = extension_queue
         self.rt_stage : UsdRt.Stage = None
         self.pxr_stage : Usd.Stage = None
         self.attached_stage_id = None
@@ -45,7 +45,7 @@ class UsdStageManager:
 
         while True:
             try:
-                data = self._queue.get_nowait()
+                data = self.queue.get_nowait()
 
             except queue.Empty:
                 break

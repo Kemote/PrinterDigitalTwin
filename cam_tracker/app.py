@@ -47,7 +47,8 @@ class CamTracker:
         self.red_ranges = red_ranges
         self.green_ranges = green_ranges
         self.min_contour_area = min_contour_area
-
+        self.last_green_pos = None
+        self.last_red_pos = None
         self.cap = None
         self.prev_time = None
         self.video_to_real = VideoToRealPosCalc()
@@ -174,13 +175,20 @@ class CamTracker:
 
             if red_pos is not None and green_pos is not None:
                 x, y, z = self.video_to_real.get_printer_head_pos(red_pos[0], red_pos[1], green_pos[0], green_pos[1])
-                print(f"X: {x}")
-                print(f"Y: {y}")
-                print(f"Z: {z}")
-                self.telemetry_server.broadcast_position(x, y, z)
+                if self.last_red_pos:
+                    red_diff_x = (red_pos[0] - self.last_red_pos[0]) / FRAME_HEIGHT * 100
+                    red_diff_y = (red_pos[1] - self.last_red_pos[1]) /  FRAME_WIDTH * 100
+                    green_diff_x = (green_pos[0] - self.last_green_pos[0]) / FRAME_HEIGHT * 100
+                    green_diff_y = (green_pos[1] - self.last_green_pos[1]) / FRAME_WIDTH * 100
+                    print(f"DIFFS: {abs(red_diff_x + red_diff_y + green_diff_x + green_diff_y)}")
+
+                self.last_red_pos = red_pos
+                self.last_green_pos = green_pos
+
+                self.telemetry_server.broadcast_position(x, y, z, red_pos[0], red_pos[1], green_pos[0], green_pos[1])
 
             else:
-                self.telemetry_server.broadcast_position(None, None, None)
+                self.telemetry_server.broadcast_position(None, None, None, None, None, None, None)
 
             # Exit on 'q' press
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -220,11 +228,19 @@ class TelemetryServer:
         if self._thread is not None:
             self._thread.join(timeout=1.0)
 
-    def broadcast_position(self, x, y, z):
+    def broadcast_position(self, x, y, z, red_pos_x, red_pos_y, green_pos_x, green_pos_y):
         # Server hasn't finished starting yet, or no clients are connected.
         if self._server is None:
             return
-        payload = json.dumps({"type": "position", "x": x, "y": y, "z": z, "t": time.time()})
+        payload = json.dumps({"type": "position", 
+                              "x": x, 
+                              "y": y, 
+                              "z": z, 
+                              "marker_rx": red_pos_x,
+                              "marker_ry": red_pos_y,
+                              "marker_gx": green_pos_x,
+                              "marker_gy": green_pos_y,
+                              "t": time.time()})
         # Not using websockets.broadcast(): in websockets 17.1 it skips every sync
         # connection, because it checks `send_in_progress is not None` while the
         # sync Connection initializes that field to False rather than None. Sending
