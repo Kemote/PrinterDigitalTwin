@@ -9,7 +9,6 @@ class Calibrator:
     def __init__(self, printer_bridge, printer_vision, extension_queue):
         self.printer_bridge = printer_bridge
         self.printer_vision = printer_vision
-        self.get_corrections = True
         self.queue = extension_queue
 
         self.calib_pos = None
