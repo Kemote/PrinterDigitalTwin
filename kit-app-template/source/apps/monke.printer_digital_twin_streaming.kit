@@ -18,6 +18,7 @@ template_name = "omni.streaming_configuration"
 [dependencies]
 "monke.printer_digital_twin" = {}  # Application kit file
 "omni.kit.livestream.app" = {}  # Livestream extension
+"omni.services.livestream.webrtc" = {}
 
 [settings.app]
 fastShutdown = true
@@ -28,7 +29,9 @@ window.height = 1080
 window.width = 1920
 
 [settings]
-rtx.post.aa.op = 3
+exts.omni.kit.livestream.app".primaryStream.streamType="webrtc"
+exts.omni.kit.livestream.app".primaryStream.signalPort=49100
+exts.omni.services.transport.server.http:.port=8011
 rtx.verifyDriverVersion.enabled = false
 
 [settings.app.extensions]

@@ -1,5 +1,4 @@
-import time
-import queue
+import asyncio
 import os
 import json
 
@@ -7,11 +6,10 @@ import json
 class Calibrator:
     CALIBRATION_FILE = "./calibration.json"
 
-    def __init__(self, printer_bridge, printer_vision, queue):
+    def __init__(self, printer_bridge, printer_vision, extension_queue):
         self.printer_bridge = printer_bridge
         self.printer_vision = printer_vision
-        self.get_corrections = True
-        self.queue = queue
+        self.queue = extension_queue
 
         self.calib_pos = None
         recalibrate = os.environ.get("RECALIBRATE_VISION") == "True"
@@ -19,8 +17,8 @@ class Calibrator:
             with open(self.CALIBRATION_FILE, "r") as f:
                 self.calib_pos = json.load(f)
 
-    def _send_calibration(self):
-        self.printer_vision.send_calibration({
+    async def _send_calibration(self):
+        await self.printer_vision.send_calibration({
             "rtl_pos": self.calib_pos["r_pos_tl"],
             "rtr_pos": self.calib_pos["r_pos_tr"],
             "rbr_pos": self.calib_pos["r_pos_br"],
@@ -28,9 +26,9 @@ class Calibrator:
             "gt_pos": self.calib_pos["g_pos_max"],
             "gb_pos": self.calib_pos["g_pos_min"]
         })
-        time.sleep(2)
+        await asyncio.sleep(2)
 
-    def calibrate_printer(self):
+    async def calibrate_printer(self):
         # calibrate printer with webcam
         if not self.calib_pos:
             print("[monke.printer_interface] Calibrating printer....")
@@ -59,16 +57,20 @@ class Calibrator:
                 y = step["position"][1]
                 z = step["position"][2]
 
-                self.printer_bridge.set_position(x, y, z)
+                await self.printer_bridge.set_position(x, y, z)
                 print(f"[monke.printer_interface] Get visual position of {step['position']}")
-                time.sleep(150)
+                await asyncio.sleep(150)
 
                 queue_semaphor = False
                 while not queue_semaphor:
+                    # Wait for at least one sample - no polling, this truly
+                    # suspends and lets Kit's loop do other work - then drain
+                    # down to the freshest one, discarding any stale backlog.
+                    queue_data = await self.queue.get()
                     while True:
                         try:
                             queue_data = self.queue.get_nowait()
-                        except queue.Empty:
+                        except asyncio.QueueEmpty:
                             break
 
                     if "marker_gx" in queue_data:
@@ -83,10 +85,10 @@ class Calibrator:
                                 queue_data["marker_ry"]
                             ]
                             queue_semaphor = True
-    
+
             if not None in self.calib_pos.values():
                 with open(self.CALIBRATION_FILE, "w") as f:
                     json.dump(self.calib_pos, f)
                 print("[monke.printer_interface] Printer calibrated with vision data")
 
-        self._send_calibration()
+        await self._send_calibration()
