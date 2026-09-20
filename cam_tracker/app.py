@@ -47,8 +47,6 @@ class CamTracker:
         self.red_ranges = red_ranges
         self.green_ranges = green_ranges
         self.min_contour_area = min_contour_area
-        self.last_green_pos = None
-        self.last_red_pos = None
         self.cap = None
         self.prev_time = None
         self.video_to_real = VideoToRealPosCalc()
@@ -175,16 +173,10 @@ class CamTracker:
 
             if red_pos is not None and green_pos is not None:
                 x, y, z = self.video_to_real.get_printer_head_pos(red_pos[0], red_pos[1], green_pos[0], green_pos[1])
-                if self.last_red_pos:
-                    red_diff_x = (red_pos[0] - self.last_red_pos[0]) / FRAME_HEIGHT * 100
-                    red_diff_y = (red_pos[1] - self.last_red_pos[1]) /  FRAME_WIDTH * 100
-                    green_diff_x = (green_pos[0] - self.last_green_pos[0]) / FRAME_HEIGHT * 100
-                    green_diff_y = (green_pos[1] - self.last_green_pos[1]) / FRAME_WIDTH * 100
-                    print(f"DIFFS: {abs(red_diff_x + red_diff_y + green_diff_x + green_diff_y)}")
 
-                self.last_red_pos = red_pos
-                self.last_green_pos = green_pos
-
+                print(f"X: {x}")
+                print(f"Y: {y}")
+                print(f"Z: {z}")
                 self.telemetry_server.broadcast_position(x, y, z, red_pos[0], red_pos[1], green_pos[0], green_pos[1])
 
             else:
@@ -232,10 +224,10 @@ class TelemetryServer:
         # Server hasn't finished starting yet, or no clients are connected.
         if self._server is None:
             return
-        payload = json.dumps({"type": "position", 
-                              "x": x, 
-                              "y": y, 
-                              "z": z, 
+        payload = json.dumps({"type": "position",
+                              "x": x,
+                              "y": y,
+                              "z": z,
                               "marker_rx": red_pos_x,
                               "marker_ry": red_pos_y,
                               "marker_gx": green_pos_x,
@@ -266,7 +258,7 @@ class TelemetryServer:
         print(f"[TelemetryServer] Client connected: {remote_address}")
         try:
             for message in connection:
-                self._handle_message(connection, message)
+                self._handle_message(connection, message)   
         except ConnectionClosed:
             pass
         finally:

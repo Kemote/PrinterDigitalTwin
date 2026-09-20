@@ -42,7 +42,7 @@ class MyExtension(omni.ext.IExt):
         self._m114_thread = threading.Thread(target=self.printer_bridge.send_m114, daemon=True)
         self._m114_thread.start()
 
-        calibrator = Calibrator(self.printer_bridge, self.printer_bridge, self.queue)
+        calibrator = Calibrator(self.printer_bridge, self.printer_vision, self.queue)
         calibrator.calibrate_printer()
 
         # set omni app event stream

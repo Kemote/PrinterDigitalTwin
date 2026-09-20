@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import websocket
 
 
@@ -13,6 +14,7 @@ class PrinterVision:
         self.ws = None
         self._queue = queue
         self.cam_tracker_ws_url = os.environ.get("CAM_TRACKER_WS_URL", "ws://localhost:8765")
+        self._connected = threading.Event()
 
     def start_websocket(self):
         self.ws = websocket.WebSocketApp(
@@ -25,21 +27,26 @@ class PrinterVision:
         self.ws.run_forever()
 
 
-    def send_calibration(self, points):
+    def send_calibration(self, points, timeout=30):
         """Push new calibration corner points to cam_tracker.
 
         `points` must supply TelemetryServer.REQUIRED_CALIBRATION_POINTS'
         keys - "rtl_pos", "rtr_pos", "rbr_pos", "rbl_pos", "gt_pos", "gb_pos" -
         each a [x, y] pixel coordinate. Working out those points is not
         implemented yet; this just sends them once a caller has them.
+
+        The websocket thread connects asynchronously, so this waits (up to
+        `timeout` seconds) for that connection instead of failing immediately
+        when called right after startup.
         """
-        if not self.ws or not self.ws.sock or not self.ws.sock.connected:
+        if not self._connected.wait(timeout):
             print("[PrinterVision] Cannot send calibration: not connected to cam_tracker")
             return
         self.ws.send(json.dumps({"type": "set_calibration", "points": points}))
 
     def _on_open(self, ws):
         print("[PrinterVision] WebSocket Connected to cam_tracker.")
+        self._connected.set()
 
     def _on_message(self, ws, message):
         try:
@@ -73,3 +80,4 @@ class PrinterVision:
 
     def _on_close(self, ws, close_status, close_msg):
         print("[PrinterVision] WebSocket Closed")
+        self._connected.clear()
