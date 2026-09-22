@@ -9,10 +9,10 @@
 # its affiliates is strictly prohibited.
 
 [package]
-title = "Printer Interface"
-version = "0.1.0"  # Semantic Versioning is used: https://semver.org/
-description = "The simplest python extension example. Use it as a starting point for your extensions."
-category = "Example"  # How to categorize this in the Extension Manager
+title = "3D Printer Digital Twin"
+version = "0.1.1"  # Semantic Versioning is used: https://semver.org/
+description = "This extension is built to gather telemetry data from an OctoPrint server and a cam_tracker server, and use it for the visual representation of a printer digital twin over WebRTC or inside Omniverse."
+category = "Telemetry"  # How to categorize this in the Extension Manager
 changelog = "docs/CHANGELOG.md"
 icon = "data/icon.png"  # Icon to show in the Extension Manager
 keywords = ["kit", "example", "extension"]  # Search keywords for the Extension Manager

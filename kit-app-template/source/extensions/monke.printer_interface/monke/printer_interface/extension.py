@@ -23,16 +23,11 @@ class MyExtension(omni.ext.IExt):
         self.printer_vision = PrinterVision(self.queue)
         self.printer_bridge = PrinterBridge(self.queue)
 
-        # vision and the OctoPrint bridge each run as a coroutine on Kit's own
-        # asyncio loop instead of a dedicated OS thread - see
-        # PrinterVision.run() / PrinterBridge.run()
+        # run asyncio tasks
         self._vision_task = omni_async.run_coroutine(self.printer_vision.run())
         self._bridge_task = omni_async.run_coroutine(self.printer_bridge.run())
 
-        # calibration also runs as a coroutine (it awaits printer_vision's and
-        # printer_bridge's coroutine-based calls) - this also means
-        # calibration no longer blocks the whole extension/viewport for its
-        # duration.
+        # calibration
         calibrator = Calibrator(self.printer_bridge, self.printer_vision, self.queue)
         self._calibration_task = omni_async.run_coroutine(self._run_calibration(calibrator))
 

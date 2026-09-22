@@ -1,6 +1,6 @@
 # Printer Interface [monke.printer_interface]
 
-This is an example of pure python Kit extension. It is intended to be copied and to serve as a template to create new ones.
+This extension gather telemeatry from webcam cam_tracker and OctoPrint and make visual representation of them using usdrt stage.
 
 ## Setup
 

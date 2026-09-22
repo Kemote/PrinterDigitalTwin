@@ -1,22 +1,22 @@
 import cv2
 import json
 import time
+import platform
 import threading
 import numpy as np
 from websockets.sync.server import serve as ws_serve
 from websockets.exceptions import ConnectionClosed
 
 
-CAMERA_INDEX = 0      # Adjust if using an external USB webcam
+CAMERA_INDEX = 0      # adjust if using an external USB webcam
 FRAME_WIDTH = 800
 FRAME_HEIGHT = 600
 TARGET_FPS = 60
 FRAME_ROTATION = cv2.ROTATE_90_CLOCKWISE
-# WebSocket server that broadcasts tracked X/Y/Z position and accepts calibration
-# updates - see TelemetryServer below.
 WS_HOST = "0.0.0.0"
 WS_PORT = 8765
-# Define HSV color ranges for the two markers.
+
+# define HSV color ranges for the two markers.
 RED_RANGES = [
     (np.array([0, 100, 100]), np.array([10, 255, 255])),
     (np.array([160, 100, 100]), np.array([179, 255, 255])),
@@ -50,13 +50,14 @@ class CamTracker:
         self.cap = None
         self.prev_time = None
         self.video_to_real = VideoToRealPosCalc()
-        # Broadcasts self.video_to_real's output over WebSocket and lets a
-        # connected client (e.g. the Omniverse extension) push new calibration
-        # points, which swaps self.video_to_real for a freshly calibrated one.
         self.telemetry_server = TelemetryServer(self, host=ws_host, port=ws_port)
 
     def init_camera(self):
-        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)  # Use CAP_DSHOW on Windows, CAP_V4L2 on Linux
+        if platform.system() == "Windows":
+            cap_type = cv2.CAP_DSHOW
+        else:
+            cap_type = cv2.CAP_V4L2
+        self.cap = cv2.VideoCapture(self.camera_index, cap_type)
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera index {self.camera_index}. Check CAMERA_INDEX / /dev/video*.")
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -152,11 +153,6 @@ class CamTracker:
                 cv2.putText(frame, f"X:{cX} Y:{cY}", (cX + 10, cY - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            # --- 60 Hz POSITION OUTPUT ---
-            # Coordinates in pixel space (0,0 is top-left)
-            # if red_pos: print(f"[{current_time:.3f}] Red Marker -> X: {red_pos[0]}, Y: {red_pos[1]}")
-            # if green_pos: print(f"[{current_time:.3f}] Green Marker -> X: {green_pos[0]}, Y: {green_pos[1]}")
-
             red_text = f"Red   X:{red_pos[0]} Y:{red_pos[1]}" if red_pos else "Red   not found"
             green_text = f"Green X:{green_pos[0]} Y:{green_pos[1]}" if green_pos else "Green not found"
             cv2.putText(frame, red_text, (10, 60),
@@ -221,7 +217,6 @@ class TelemetryServer:
             self._thread.join(timeout=1.0)
 
     def broadcast_position(self, x, y, z, red_pos_x, red_pos_y, green_pos_x, green_pos_y):
-        # Server hasn't finished starting yet, or no clients are connected.
         if self._server is None:
             return
         payload = json.dumps({"type": "position",
@@ -233,12 +228,7 @@ class TelemetryServer:
                               "marker_gx": green_pos_x,
                               "marker_gy": green_pos_y,
                               "t": time.time()})
-        # Not using websockets.broadcast(): in websockets 17.1 it skips every sync
-        # connection, because it checks `send_in_progress is not None` while the
-        # sync Connection initializes that field to False rather than None. Sending
-        # to each connection directly still goes through Connection.send()'s own
-        # lock, so it stays safe to call from this thread while handler threads are
-        # blocked receiving on the same connections.
+
         for connection in list(self._server.connections):
             try:
                 connection.send(payload)
@@ -321,7 +311,7 @@ class VideoToRealPosCalc:
             rbr_pos,
             rbl_pos
         ])
-        self.homograpgy_matrix = self._create_homography_matrix(r_camera_src_pts)
+        self.homography_matrix = self._create_homography_matrix(r_camera_src_pts)
 
         # gree marker Y part
         self.printer_y_max = 210
@@ -342,7 +332,7 @@ class VideoToRealPosCalc:
     def get_printer_head_pos(self, rcam_x, rcam_y, gcam_x, gcam_y):
         # calculate red marker
         detected_cam_pos = np.array([[[rcam_x, rcam_y]]], dtype=np.float32)
-        transformed_pos = cv2.perspectiveTransform(detected_cam_pos, self.homograpgy_matrix)
+        transformed_pos = cv2.perspectiveTransform(detected_cam_pos, self.homography_matrix)
         fin_x, fin_z = transformed_pos[0][0]
 
         # calcualte green marker
