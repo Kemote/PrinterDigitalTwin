@@ -108,7 +108,7 @@ class PrinterBridge:
             )
 
     async def set_position(self, x, y, z):
-        print(f"[PrinterBridge] Seting printer position {x}, {y}, {z}...")
+        print(f"[PrinterBridge] Setting printer position {x}, {y}, {z}...")
         if self.is_printing:
             return False
 
@@ -129,7 +129,7 @@ class PrinterBridge:
 
     async def _handle_message(self, message):
         data = json.loads(message)
-        rafined_data = {}
+        refined_data = {}
         payload = data.get("current")
 
         if payload:
@@ -144,13 +144,13 @@ class PrinterBridge:
             temps = payload.get("temps", [{}])
             if len(temps) > 0:
                 temps = temps[0]
-                rafined_data |= {
+                refined_data |= {
                     "bed_actual": temps.get("bed", {}).get("actual", 0.0),
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
 
             # get telemetry position
             logs = payload.get("logs", [])
-            rafined_data["tele_x"], rafined_data["tele_y"], rafined_data["tele_z"] = self._parse_position_from_logs(logs)
+            refined_data["tele_x"], refined_data["tele_y"], refined_data["tele_z"] = self._parse_position_from_logs(logs)
 
-            self._queue.put_nowait(rafined_data)
+            self._queue.put_nowait(refined_data)

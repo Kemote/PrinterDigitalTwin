@@ -63,8 +63,8 @@ class PrinterVision:
             print(f"[PrinterVision] Unknown message type: {msg_type!r}")
 
     async def send_calibration(self, points, timeout=30):
-        """Push new calibration corner points to cam_tracker.
-
+        """
+        Push new calibration corner points to cam_tracker.
         `points` must supply TelemetryServer.REQUIRED_CALIBRATION_POINTS'
         keys - "rtl_pos", "rtr_pos", "rbr_pos", "rbl_pos", "gt_pos", "gb_pos" -
         each a [x, y] pixel coordinate.

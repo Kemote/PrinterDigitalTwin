@@ -10,9 +10,6 @@ from usdrt import Usd as UsdRt, Sdf as SdfRt, UsdShade as UsdShadeRt, Gf as GfRt
 class UsdStageManager:
     PRINTER_PATH = "monkeDisc://assets/AnycubicI3Mega/AnycubicI3Mega.usda"
     ANYCUBIC_PRIM_PATH_STR = "/World/Printers/AnycubicI3Mega"
-    # OctoPrint pushes new telemetry roughly once a second; smooth motion between
-    # samples over the same span so a new sample arrives right as the previous
-    # interpolation finishes.
     SMOOTH_DURATION = 1.0
 
     def __init__(self, extension_queue):
@@ -27,8 +24,6 @@ class UsdStageManager:
         self.x_home_pos = None
         self.y_home_pos = None
         self.z_home_pos = None
-        # interpolation state: value we're animating from/to, and when the
-        # animation toward the current target began
         self.x_start_val = None
         self.x_target_val = None
         self.x_update_time = None
@@ -51,27 +46,23 @@ class UsdStageManager:
                 break
 
             self._on_telemetry(data)
-
-        # runs every frame regardless of new telemetry, so motion stays smooth
-        # between the low-frequency samples pushed by OctoPrint
         self._apply_position_interpolation()
 
     def _on_telemetry(self, data):
         # update materials
-        self._upadte_thermalpad_mat(data)
+        self._update_thermalpad_mat(data)
 
-        # update position targets; the actual per-frame motion is applied by
-        # _apply_position_interpolation
+        # update position targets; motion is actually applied by _apply_position_interpolation()
         self._set_position_targets(data)
 
     def _get_stage(self):
         omni_ctx = omni.usd.get_context()
         stage_id = omni_ctx.get_stage_id()
         if not stage_id:
-            print("[PrinterBridge] No USD stage found")
+            print("[UsdStageManager] No USD stage found")
             return False
 
-        # stage id is changin when user open new stage or stage get recomposed etc...
+        # stage id is changing when user open new stage or stage get recomposed etc...
         if not self.rt_stage or stage_id != self.attached_stage_id:
             stage : Usd.Stage = omni_ctx.get_stage()
             if not stage:
@@ -123,7 +114,7 @@ class UsdStageManager:
 
         return True
 
-    def _upadte_thermalpad_mat(self, data):
+    def _update_thermalpad_mat(self, data):
         bed_temp = data.get("bed_actual")
         bed_target = data.get("bed_target", 110)    # max standard firmware bed temp
         if bed_temp:            
@@ -165,12 +156,7 @@ class UsdStageManager:
         return GfRt.Vec3f([r, g, b])
 
     def _get_home_pos(self, prim_path_str):
-        # Read the home position via plain pxr USD instead of usdrt's Fabric-backed
-        # world-position attribute: the latter is only populated once Fabric has
-        # flattened a transform for this prim, which never happens for a prim with
-        # no authored xformOps (confirmed: it stays permanently invalid here). This
-        # one-time read isn't performance sensitive, so there's no need for the
-        # Fabric fast path.
+        # home position is obtained by standard pxr lib instead of omni.usdrt, because prims without xformOps leave fabric world position invalid
         prim = self.pxr_stage.GetPrimAtPath(prim_path_str)
         world_transform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return world_transform.ExtractTranslation()

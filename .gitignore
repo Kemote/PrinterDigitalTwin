@@ -1,3 +1,7 @@
 printer.env
 ./blend_file/images/
 kit-app-template/source/extensions/monke.printer_interface/pip_prebundle/
+__pycache__/
+*.etli
+calibration.json
+*.blend1
