@@ -1,6 +1,6 @@
 # Printer Interface [monke.printer_interface]
 
-This extension gather telemeatry from webcam cam_tracker and OctoPrint and make visual representation of them using usdrt stage.
+This extension gathers telemetry from the webcam-based `cam_tracker` and from OctoPrint, and uses it to drive a visual representation of the printer on a USD stage via usdrt.
 
 ## Setup
 
