@@ -74,7 +74,15 @@ class Calibrator:
                             break
 
                     if "marker_gx" in queue_data:
-                        if None not in [queue_data["marker_gx"], queue_data["marker_gy"], queue_data["marker_rx"], queue_data["marker_ry"]]:
+                        # Only require the green marker for steps that actually
+                        # use it (g_key set) - steps 3/4 only need the red
+                        # marker, and requiring green too can stall forever if
+                        # it isn't in frame at that head position.
+                        required_vals = [queue_data["marker_rx"], queue_data["marker_ry"]]
+                        if step["g_key"]:
+                            required_vals += [queue_data["marker_gx"], queue_data["marker_gy"]]
+
+                        if None not in required_vals:
                             if step["g_key"]:
                                 self.calib_pos[step["g_key"]] = [
                                     queue_data["marker_gx"],
