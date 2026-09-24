@@ -23,8 +23,6 @@ class PrinterBridge:
         self.session = None
         self.home_pos = True
         self.is_printing = False
-        self.is_paused = False
-        self.is_ready = False
         self.octo_url = os.environ.get("OCTO_URL")
         self.octo_api_key = os.environ.get("OCTO_API_KEY")
         self.octo_ws_url = os.environ.get("OCTO_WS_URL")
@@ -62,8 +60,6 @@ class PrinterBridge:
         state_data = payload.get("state", {})
         flags = state_data.get("flags", {})
         self.is_printing = flags.get("printing", False)
-        self.is_paused = flags.get("paused", False)
-        self.is_ready = flags.get("ready", False)
 
     async def _listen_websocket(self):
         # `async for ws in websockets.connect(...)` reconnects automatically
