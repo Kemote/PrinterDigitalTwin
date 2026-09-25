@@ -2,14 +2,17 @@ import time
 import carb
 import asyncio
 import omni
+import numpy as np
 
-from pxr import Usd, UsdGeom
-from usdrt import Usd as UsdRt, Sdf as SdfRt, UsdShade as UsdShadeRt, Gf as GfRt, Rt
+from pxr import Usd, Sdf, UsdGeom
+from usdrt import Usd as UsdRt, Sdf as SdfRt, Gf as GfRt, Vt as VtRt, Rt, UsdShade as UsdShadeRt, UsdGeom as UsdGeomRt
 
 
 class UsdStageManager:
     PRINTER_PATH = "monkeDisc://assets/AnycubicI3Mega/AnycubicI3Mega.usda"
     ANYCUBIC_PRIM_PATH_STR = "/World/Printers/AnycubicI3Mega"
+    INSTANCER_PATH_STR = f"{ANYCUBIC_PRIM_PATH_STR}/Geom/bed/instance"
+    INSTANCER_SPHERE_SIZE = 0.3
     SMOOTH_DURATION = 1.0
 
     def __init__(self, extension_queue):
@@ -33,6 +36,7 @@ class UsdStageManager:
         self.z_start_val = None
         self.z_target_val = None
         self.z_update_time = None
+        self.last_instance_pos = None
 
     def on_update(self, _event : carb.events.IEventStream):
         if not self._get_stage():
@@ -72,6 +76,17 @@ class UsdStageManager:
             printer_prim : Usd.Prim = stage.DefinePrim(self.ANYCUBIC_PRIM_PATH_STR, "Xform")
             printer_prim.GetReferences().AddReference(self.PRINTER_PATH)
 
+            # add instancer:
+            instancer_path = Sdf.Path(f"{self.INSTANCER_PATH_STR}/instancer")
+            stage.DefinePrim(instancer_path, "Xform")
+            instancer = UsdGeom.PointInstancer.Define(stage, instancer_path)
+
+            # create sphere
+            sphere_path = Sdf.Path(f"{self.INSTANCER_PATH_STR}/sphereProto")
+            sphere : UsdGeom.Sphere = UsdGeom.Sphere.Define(stage, sphere_path)
+            sphere.GetRadiusAttr().Set(self.INSTANCER_SPHERE_SIZE)
+            instancer.GetPrototypesRel().SetTargets([sphere_path])
+
             self.pxr_stage = stage
             self.rt_stage = UsdRt.Stage.Attach(stage_id)
             self.attached_stage_id = stage_id
@@ -105,7 +120,7 @@ class UsdStageManager:
             y_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
             y_prim = self.rt_stage.GetPrimAtPath(y_prim_path)
             if y_prim.IsValid():
-                self.y_xfrom= Rt.Xformable(y_prim)
+                self.y_xfrom = Rt.Xformable(y_prim)
 
             z_prim_path = SdfRt.Path(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner")
             z_prim = self.rt_stage.GetPrimAtPath(z_prim_path)
@@ -165,10 +180,15 @@ class UsdStageManager:
         x = data.get("pos_x")
         y = data.get("pos_y")
         z = data.get("pos_z")
-
+        e = data.get("tele_e") or 0.0
+        
+        new_x_pos = None
+        new_y_pos = None
+        new_z_pos = None
+        
         if x is not None and self.x_xfrom:
             if self.x_home_pos is None:
-                self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead")
+                self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead/extruderEnd")
             else:
                 new_x_pos = (self.x_home_pos[0] - x) / 10
                 self.x_start_val, self.x_target_val, self.x_update_time = self._retarget(
@@ -192,6 +212,42 @@ class UsdStageManager:
                 self.z_start_val, self.z_target_val, self.z_update_time = self._retarget(
                     self.z_start_val, self.z_target_val, self.z_update_time, new_z_pos
                 )
+
+        # add sphere instance to simualte printing process
+        # TODO: try to calculate difference in position and add e factor
+
+        # if e > 0:
+        if new_x_pos is not None and new_z_pos is not None:
+            self._add_sphere_instance(new_x_pos + 5.14, (new_y_pos * -1) - 1.387, new_z_pos + 0.557)
+
+    def _add_sphere_instance(self, x, y, z):
+        # check distance from previous sphere
+        if self.last_instance_pos is not None:
+            new_point = np.array([x, y, z])
+            distance = np.linalg.norm(new_point - self.last_instance_pos)
+            
+            if distance >= self.INSTANCER_SPHERE_SIZE * 0.9:
+                instancer_path = SdfRt.Path(f"{self.INSTANCER_PATH_STR}/instancer")
+                instancer_prim = self.rt_stage.GetPrimAtPath(instancer_path)
+                if instancer_prim:
+                    instancer = UsdGeomRt.PointInstancer(instancer_prim)
+                    pos_attr = instancer.GetPositionsAttr()
+                    proto_attr = instancer.GetProtoIndicesAttr()
+
+                    current_pos = pos_attr.Get()
+                    pos_list = list(current_pos) if current_pos is not None else []
+
+                    current_proto = proto_attr.Get()
+                    proto_list = list(current_proto) if current_proto is not None else []
+
+                    pos_list.append(GfRt.Vec3f(x, y, z))
+                    proto_list.append(0)
+
+                    pos_attr.Set(VtRt.Vec3fArray(pos_list))
+                    proto_attr.Set(VtRt.IntArray(proto_list))    
+                    self.last_instance_pos = np.array([x, y, z]) 
+        else:
+            self.last_instance_pos = np.array([x, y, z]) 
 
     def _retarget(self, start, target, start_time, new_value):
         # Begin a fresh interpolation toward new_value, starting from wherever

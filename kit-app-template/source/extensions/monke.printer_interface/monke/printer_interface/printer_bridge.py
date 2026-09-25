@@ -9,14 +9,14 @@ from websockets.exceptions import ConnectionClosed
 
 class PrinterBridge:
     """Talks to OctoPrint: authenticates, listens to its status websocket for
-    live printer state/telemetry, and polls M114 so position (tele_x/y/z)
-    shows up in that feed. Owns its own concurrency - run() fans out into the
+    live printer state/telemetry, and polls M114 so position/extrusion
+    (tele_x/y/z/e) shows up in that feed. Owns its own concurrency - run() fans out into the
     websocket listener and the M114 poller as sibling tasks - so extension.py
     only has to schedule one coroutine via omni.kit.async_engine.
     """
 
     def __init__(self, extension_queue):
-        self._M114_RE = re.compile(r"X:(-?\d+\.?\d*)\s+Y:(-?\d+\.?\d*)\s+Z:(-?\d+\.?\d*)")
+        self._M114_RE = re.compile(r"X:(-?\d+\.?\d*)\s+Y:(-?\d+\.?\d*)\s+Z:(-?\d+\.?\d*)\s+E:(-?\d+\.?\d*)")
         self.ws = None
         self._queue = extension_queue
         self.username = None
@@ -119,9 +119,9 @@ class PrinterBridge:
         for line in logs:
             match = self._M114_RE.search(line)
             if match:
-                x, y, z = match.groups()
-                return float(x), float(y), float(z)
-        return None, None, None
+                x, y, z, e = match.groups()
+                return float(x), float(y), float(z), float(e)
+        return None, None, None, None
 
     async def _handle_message(self, message):
         data = json.loads(message)
@@ -147,6 +147,11 @@ class PrinterBridge:
 
             # get telemetry position
             logs = payload.get("logs", [])
-            refined_data["tele_x"], refined_data["tele_y"], refined_data["tele_z"] = self._parse_position_from_logs(logs)
+            (
+                refined_data["tele_x"],
+                refined_data["tele_y"],
+                refined_data["tele_z"],
+                refined_data["tele_e"],
+            ) = self._parse_position_from_logs(logs)
 
             self._queue.put_nowait(refined_data)
