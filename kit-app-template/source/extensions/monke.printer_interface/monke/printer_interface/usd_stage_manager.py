@@ -185,7 +185,7 @@ class UsdStageManager:
         new_x_pos = None
         new_y_pos = None
         new_z_pos = None
-        
+
         if x is not None and self.x_xfrom:
             if self.x_home_pos is None:
                 self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead/extruderEnd")
@@ -213,12 +213,12 @@ class UsdStageManager:
                     self.z_start_val, self.z_target_val, self.z_update_time, new_z_pos
                 )
 
-        # add sphere instance to simualte printing process
-        # TODO: try to calculate difference in position and add e factor
-
         # if e > 0:
         if new_x_pos is not None and new_z_pos is not None:
-            self._add_sphere_instance(new_x_pos + 5.14, (new_y_pos * -1) - 1.387, new_z_pos + 0.557)
+            self._add_sphere_instance(new_x_pos + self.x_home_pos[0], 
+                                      (new_y_pos * -1) + self.x_home_pos[1], 
+                                      new_z_pos + self.x_home_pos[2] - self.INSTANCER_SPHERE_SIZE)
+
 
     def _add_sphere_instance(self, x, y, z):
         # check distance from previous sphere
