@@ -12,7 +12,7 @@ class UsdStageManager:
     PRINTER_PATH = "monkeDisc://assets/AnycubicI3Mega/AnycubicI3Mega.usda"
     ANYCUBIC_PRIM_PATH_STR = "/World/Printers/AnycubicI3Mega"
     INSTANCER_PATH_STR = f"{ANYCUBIC_PRIM_PATH_STR}/Geom/bed/instance"
-    INSTANCER_SPHERE_SIZE = 0.3
+    INSTANCER_SPHERE_SIZE = 0.03
     SMOOTH_DURATION = 1.0
 
     def __init__(self, extension_queue):
@@ -180,8 +180,7 @@ class UsdStageManager:
         x = data.get("pos_x")
         y = data.get("pos_y")
         z = data.get("pos_z")
-        e = data.get("tele_e") or 0.0
-        
+
         new_x_pos = None
         new_y_pos = None
         new_z_pos = None
@@ -191,34 +190,29 @@ class UsdStageManager:
                 self.x_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner/extruderHead/extruderEnd")
             else:
                 new_x_pos = (self.x_home_pos[0] - x) / 10
-                self.x_start_val, self.x_target_val, self.x_update_time = self._retarget(
-                    self.x_start_val, self.x_target_val, self.x_update_time, new_x_pos
-                )
 
         if y is not None and self.y_xfrom:
             if self.y_home_pos is None:
                 self.y_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/bed")
             else:
                 new_y_pos = (self.y_home_pos[1] + y) / 10
-                self.y_start_val, self.y_target_val, self.y_update_time = self._retarget(
-                    self.y_start_val, self.y_target_val, self.y_update_time, new_y_pos
-                )
 
         if z is not None and self.z_xfrom:
             if self.z_home_pos is None:
                 self.z_home_pos = self._get_home_pos(f"{self.ANYCUBIC_PRIM_PATH_STR}/Geom/verticalRunner")
             else:
                 new_z_pos = (self.z_home_pos[2] + z) / 10
-                self.z_start_val, self.z_target_val, self.z_update_time = self._retarget(
-                    self.z_start_val, self.z_target_val, self.z_update_time, new_z_pos
-                )
 
-        # if e > 0:
-        if new_x_pos is not None and new_z_pos is not None:
-            self._add_sphere_instance(new_x_pos + self.x_home_pos[0], 
-                                      (new_y_pos * -1) + self.x_home_pos[1], 
-                                      new_z_pos + self.x_home_pos[2] - self.INSTANCER_SPHERE_SIZE)
-
+        # Retarget every axis together, even ones with no new value this tick
+        # (falling back to their current target), so all three share one
+        # timeline and arrive at the same time instead of each axis animating
+        # on its own independent schedule.
+        if new_x_pos is not None or new_y_pos is not None or new_z_pos is not None:
+            self._retarget_axes(
+                new_x_pos if new_x_pos is not None else self.x_target_val,
+                new_y_pos if new_y_pos is not None else self.y_target_val,
+                new_z_pos if new_z_pos is not None else self.z_target_val,
+            )
 
     def _add_sphere_instance(self, x, y, z):
         # check distance from previous sphere
@@ -249,30 +243,56 @@ class UsdStageManager:
         else:
             self.last_instance_pos = np.array([x, y, z]) 
 
-    def _retarget(self, start, target, start_time, new_value):
-        # Begin a fresh interpolation toward new_value, starting from wherever
-        # the previous interpolation currently is (not its old target) so
-        # retargeting mid-motion doesn't cause a visible snap.
-        current = new_value if target is None else self._current_value(start, target, start_time)
-        return current, new_value, time.time()
+    def _retarget_axes(self, new_x_pos, new_y_pos, new_z_pos):
+        # Begin a fresh interpolation toward the new targets, starting from
+        # wherever each axis's previous interpolation currently is (not its
+        # old target) so retargeting mid-motion doesn't cause a visible snap.
+        # All three axes share the same start time so the toolhead moves as
+        # one coordinated motion and arrives together, instead of whichever
+        # axis got new telemetry racing ahead of the others.
+        now = time.time()
+
+        if new_x_pos is not None:
+            self.x_start_val = new_x_pos if self.x_target_val is None else self._current_value(self.x_start_val, self.x_target_val, self.x_update_time)
+            self.x_target_val = new_x_pos
+
+        if new_y_pos is not None:
+            self.y_start_val = new_y_pos if self.y_target_val is None else self._current_value(self.y_start_val, self.y_target_val, self.y_update_time)
+            self.y_target_val = new_y_pos
+
+        if new_z_pos is not None:
+            self.z_start_val = new_z_pos if self.z_target_val is None else self._current_value(self.z_start_val, self.z_target_val, self.z_update_time)
+            self.z_target_val = new_z_pos
+
+        self.x_update_time = self.y_update_time = self.z_update_time = now
 
     def _current_value(self, start, target, start_time):
         t = min((time.time() - start_time) / self.SMOOTH_DURATION, 1.0)
         return start + (target - start) * t
 
     def _apply_position_interpolation(self):
+        current_x = current_y = current_z = None
+
         if self.x_xfrom and self.x_target_val is not None:
-            pos = self._current_value(self.x_start_val, self.x_target_val, self.x_update_time)
-            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(pos, 0.0, 0.0))
+            current_x = self._current_value(self.x_start_val, self.x_target_val, self.x_update_time)
+            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(current_x, 0.0, 0.0))
             self.x_xfrom.CreateLocalMatrixAttr(transform_matrix)
 
         if self.y_xfrom and self.y_target_val is not None:
-            pos = self._current_value(self.y_start_val, self.y_target_val, self.y_update_time)
-            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(0.0, pos, 0.0))
+            current_y = self._current_value(self.y_start_val, self.y_target_val, self.y_update_time)
+            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(0.0, current_y, 0.0))
             self.y_xfrom.CreateLocalMatrixAttr(transform_matrix)
 
         if self.z_xfrom and self.z_target_val is not None:
-            pos = self._current_value(self.z_start_val, self.z_target_val, self.z_update_time)
-            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(0.0, 0.0, pos))
+            current_z = self._current_value(self.z_start_val, self.z_target_val, self.z_update_time)
+            transform_matrix = GfRt.Matrix4d().SetTranslate(GfRt.Vec3d(0.0, 0.0, current_z))
             self.z_xfrom.CreateLocalMatrixAttr(transform_matrix)
+
+        # Sample the same smoothed positions driving the toolhead so the
+        # sphere trail follows the interpolated path each frame, instead of
+        # jumping straight to each new telemetry target.
+        if current_x is not None and current_y is not None and current_z is not None and self.x_home_pos is not None:
+            self._add_sphere_instance(current_x + self.x_home_pos[0],
+                                      (current_y * -1) + self.x_home_pos[1],
+                                      current_z + self.x_home_pos[2] - self.INSTANCER_SPHERE_SIZE -0.3)
 
