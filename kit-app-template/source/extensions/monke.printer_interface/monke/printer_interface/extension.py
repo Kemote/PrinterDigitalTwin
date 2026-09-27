@@ -23,18 +23,15 @@ class MyExtension(omni.ext.IExt):
         self.printer_vision = PrinterVision(self.queue)
         self.printer_bridge = PrinterBridge(self.queue)
 
-        # run asyncio tasks
         self._vision_task = omni_async.run_coroutine(self.printer_vision.run())
         self._bridge_task = omni_async.run_coroutine(self.printer_bridge.run())
 
-        # calibration
         calibrator = Calibrator(self.printer_bridge, self.printer_vision, self.queue)
         self._calibration_task = omni_async.run_coroutine(self._run_calibration(calibrator))
 
     async def _run_calibration(self, calibrator):
         await calibrator.calibrate_printer()
 
-        # set omni app event stream
         self.usd_stage_mgr = UsdStageManager(self.queue)
         app = omni.kit.app.get_app()
         update_stream = app.get_update_event_stream()

@@ -54,7 +54,6 @@ class UsdStageManager:
         self._apply_position_interpolation()
 
     def _on_telemetry(self, data):
-        # update materials
         self._update_thermalpad_mat(data)
 
         # update position targets; motion is actually applied by _apply_position_interpolation()
@@ -67,7 +66,7 @@ class UsdStageManager:
             print("[UsdStageManager] No USD stage found")
             return False
 
-        # stage id is changing when user open new stage or stage get recomposed etc...
+        # stage id changes when the user opens a new stage or the stage gets recomposed, etc...
         if not self.rt_stage or stage_id != self.attached_stage_id:
             stage : Usd.Stage = omni_ctx.get_stage()
             if not stage:
@@ -77,12 +76,10 @@ class UsdStageManager:
             printer_prim : Usd.Prim = stage.DefinePrim(self.ANYCUBIC_PRIM_PATH_STR, "Xform")
             printer_prim.GetReferences().AddReference(self.PRINTER_PATH)
 
-            # add instancer:
             instancer_path = Sdf.Path(f"{self.INSTANCER_PATH_STR}/instancer")
             stage.DefinePrim(instancer_path, "Xform")
             instancer = UsdGeom.PointInstancer.Define(stage, instancer_path)
 
-            # create sphere
             sphere_path = Sdf.Path(f"{self.INSTANCER_PATH_STR}/sphereProto")
             sphere : UsdGeom.Sphere = UsdGeom.Sphere.Define(stage, sphere_path)
             sphere.GetRadiusAttr().Set(self.INSTANCER_SPHERE_SIZE)
@@ -210,10 +207,8 @@ class UsdStageManager:
             else:
                 new_z_pos = (self.z_home_pos[2] + z) / 10
 
-        # Retarget every axis together, even ones with no new value this tick
-        # (falling back to their current target), so all three share one
-        # timeline and arrive at the same time instead of each axis animating
-        # on its own independent schedule.
+        # Fall back to each axis's current target when telemetry didn't include
+        # it, so _retarget_axes always retargets all three axes together.
         if new_x_pos is not None or new_y_pos is not None or new_z_pos is not None:
             self._retarget_axes(
                 new_x_pos if new_x_pos is not None else self.x_target_val,
@@ -222,7 +217,6 @@ class UsdStageManager:
             )
 
     def _add_sphere_instance(self, x, y, z):
-        # check distance from previous sphere
         if self.last_instance_pos is not None:
             new_point = np.array([x, y, z])
             distance = np.linalg.norm(new_point - self.last_instance_pos)

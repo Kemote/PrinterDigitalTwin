@@ -121,10 +121,8 @@ class CamTracker:
             self.prev_time = current_time
             instant_fps = 1.0 / dt if dt > 0 else 0
 
-            # 1. Convert BGR to HSV color space
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-            # 2. Threshold the HSV image and locate each marker
             red_mask = self.color_mask(hsv, self.red_ranges)
             green_mask = self.color_mask(hsv, self.green_ranges)
 
@@ -160,11 +158,9 @@ class CamTracker:
             cv2.putText(frame, green_text, (10, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            # Display performance readout
             cv2.putText(frame, f"FPS: {instant_fps:.1f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
 
-            # Display output feed
             cv2.imshow("60 FPS Nozzle Tracker", frame)
 
             if red_pos is not None and green_pos is not None:
@@ -294,7 +290,7 @@ class TelemetryServer:
 
 
 class VideoToRealPosCalc:
-    # Those point should be get through calibration
+    # These points should be obtained through calibration
     def __init__(self, rtl_pos=[129, 217], rtr_pos=[444, 222], rbr_pos=[395, 477], rbl_pos=[135, 462], gt_pos=[340, 522], gb_pos=[371,703]):
         # points for Anycubic i3 Mega
         # red marker Y, Z part
@@ -313,7 +309,7 @@ class VideoToRealPosCalc:
         ])
         self.homography_matrix = self._create_homography_matrix(r_camera_src_pts)
 
-        # gree marker Y part
+        # green marker Y part
         self.printer_y_max = 210
         self.g_pts_a = np.array(gt_pos, dtype=np.float32)
         self.g_pts_b = np.array(gb_pos, dtype=np.float32)
@@ -335,7 +331,7 @@ class VideoToRealPosCalc:
         transformed_pos = cv2.perspectiveTransform(detected_cam_pos, self.homography_matrix)
         fin_x, fin_z = transformed_pos[0][0]
 
-        # calcualte green marker
+        # calculate green marker
         point = np.array([gcam_x, gcam_y], dtype=np.float32)
         point_diff = point - self.g_pts_a
         normalized_pos = np.dot(point_diff, self.diff_ab) / self.g_len_sq

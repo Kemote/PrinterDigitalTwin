@@ -29,7 +29,6 @@ class Calibrator:
         await asyncio.sleep(2)
 
     async def calibrate_printer(self):
-        # calibrate printer with webcam
         if not self.calib_pos:
             print("[monke.printer_interface] Calibrating printer....")
             if self.printer_bridge.is_printing:
