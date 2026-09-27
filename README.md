@@ -2,7 +2,7 @@
 
 ## Demo
 
-🎥 [Watch the demo video](ADD_VIDEO_LINK_HERE)
+🎥 [Watch the demo video](https://youtu.be/iVV2U_lxSzM)
 
 ## Description
 
