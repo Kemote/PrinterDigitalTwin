@@ -131,12 +131,11 @@ class PrinterBridge:
         if payload:
             self._get_flags(payload)
 
-            # set inital home pos if not printing
+            # set initial home pos if not printing
             if self.home_pos:
                 await self.send_printer_home()
                 self.home_pos = False
 
-            # get temps
             temps = payload.get("temps", [{}])
             if len(temps) > 0:
                 temps = temps[0]
@@ -145,7 +144,6 @@ class PrinterBridge:
                     "bed_target": temps.get("bed", {}).get("target", 0.0),
                 }
 
-            # get telemetry position
             logs = payload.get("logs", [])
             (
                 refined_data["tele_x"],
