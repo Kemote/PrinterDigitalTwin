@@ -37,6 +37,7 @@ class UsdStageManager:
         self.z_target_val = None
         self.z_update_time = None
         self.last_instance_pos = None
+        self.is_extruding = False
 
     def on_update(self, _event : carb.events.IEventStream):
         if not self._get_stage():
@@ -180,10 +181,16 @@ class UsdStageManager:
         x = data.get("pos_x")
         y = data.get("pos_y")
         z = data.get("pos_z")
+        e = data.get("tele_e")
 
         new_x_pos = None
         new_y_pos = None
         new_z_pos = None
+        
+        if e:
+            self.is_extruding = True
+        else:
+            self.is_extruding = False
 
         if x is not None and self.x_xfrom:
             if self.x_home_pos is None:
@@ -292,7 +299,8 @@ class UsdStageManager:
         # sphere trail follows the interpolated path each frame, instead of
         # jumping straight to each new telemetry target.
         if current_x is not None and current_y is not None and current_z is not None and self.x_home_pos is not None:
-            self._add_sphere_instance(current_x + self.x_home_pos[0],
-                                      (current_y * -1) + self.x_home_pos[1],
-                                      current_z + self.x_home_pos[2] - self.INSTANCER_SPHERE_SIZE -0.3)
+            if self.is_extruding:
+                self._add_sphere_instance(current_x + self.x_home_pos[0],
+                                        (current_y * -1) + self.x_home_pos[1],
+                                        current_z + self.x_home_pos[2] - self.INSTANCER_SPHERE_SIZE -0.3)
 
